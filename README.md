@@ -107,8 +107,8 @@ Open the local URL printed by Streamlit.
 
 - SQL validation uses simple keyword checks rather than a complete MySQL
   parser. It can reject otherwise valid SQL when names or functions contain
-  blocked keywords (for example `REPLACE()`), and it is not a security
-  boundary.
+  blocked keywords (for example `REPLACE()` or identifiers containing
+  `CALL`), and it is not a security boundary.
 - The default Ollama endpoint is local. Deploying this application for remote
   users requires a hosted LLM endpoint and a hosted, appropriately secured
   MySQL database.
