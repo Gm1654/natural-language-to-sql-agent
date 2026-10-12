@@ -1,154 +1,126 @@
 # Natural Language to SQL Agent
 
-An AI-powered agent that converts plain English questions into SQL queries and retrieves results from a MySQL database through a simple Streamlit interface.
-
-Ask questions about your data in natural language, review the generated SQL, and decide whether to execute it.
+Ask questions in plain language and generate corresponding MySQL queries. The
+application uses a local Ollama model, validates generated SQL, and lets you
+review and approve a query before it runs against your database.
 
 ## Features
 
-- **Natural Language to SQL:** Convert everyday English questions into SQL queries.
-- **Local LLM Integration:** Generate SQL using Qwen through Ollama.
-- **MySQL Integration:** Connect to a MySQL database and retrieve real query results.
-- **Human-in-the-Loop:** Review generated SQL before approving or cancelling execution.
-- **SQL Validation:** Apply checks before executing generated queries.
-- **Read-Only Execution:** Use read-only transactions for query execution.
-- **Interactive UI:** Ask questions and view results through Streamlit.
-- **Query Results:** Display database results in a readable table.
+- Local LLM SQL generation with Ollama and `qwen3.5:4b`.
+- LangGraph flow that generates SQL, validates it, and retries invalid output.
+- SELECT-only checks and read-only MySQL transactions.
+- User confirmation before executing a generated query.
+- Results displayed in a Streamlit interface, capped at 100 rows.
 
-## How It Works
+## Architecture
 
-1. Enter a question in plain English.
-2. The agent retrieves the database schema.
-3. The local language model generates an SQL query.
-4. The generated query is displayed for review.
-5. Approve or cancel the query.
-6. If approved, the query runs against MySQL and the results are displayed.
-
-## Tech Stack
-
-- **Python** — Application logic
-- **Ollama** — Local language model runtime
-- **Qwen 3.5 4B** — SQL generation
-- **MySQL** — Database
-- **Streamlit** — Web interface
-- **mysql-connector-python** — Database connectivity
-
-## Example
-
-**Question:**
-
-Which users earn more than the average salary?
-
-**Generated SQL:**
-
-```sql
-SELECT *
-FROM users
-WHERE salary > (
-    SELECT AVG(salary)
-    FROM users
-);
+```text
+main.py (Streamlit UI)
+    |  question / confirmation
+    v
+agent_graph.py (LangGraph: generate -> validate -> retry)
+    |                         |
+    v                         +--> app.py (Ollama SQL generation)
+app.py (schema, validation, MySQL execution)
 ```
 
-The agent generates the query and lets the user review it before execution.
+`app.py` owns database configuration, schema lookup, Ollama requests, SQL
+validation, and read-only query execution. `agent_graph.py` coordinates
+generation and validation retries. `main.py` provides the Streamlit UI and
+requires confirmation before execution.
 
-## Requirements
+## Setup
 
-- Python 3.10 or a compatible version
-- MySQL Server
-- Ollama
-- A compatible Qwen model pulled in Ollama
+### Requirements
 
-## Installation
+- Python 3.10 or newer
+- MySQL Server and a database
+- [Ollama](https://ollama.com/) installed and running locally
 
-### 1. Clone the repository
+### Install Python dependencies
 
-```bash
-git clone https://github.com/YOUR_USERNAME/natural-language-to-sql-agent.git
+Clone the repository and create a virtual environment:
+
+```powershell
+git clone https://github.com/Gm1654/natural-language-to-sql-agent.git
 cd natural-language-to-sql-agent
-```
-
-### 2. Install dependencies
-
-```bash
 python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-Activate the virtual environment.
+### Install and prepare Ollama
 
-**Windows:**
+Install Ollama, then pull the model used by default:
 
-```bash
-venv\Scripts\activate
-```
-
-Install the required packages:
-
-```bash
-pip install streamlit mysql-connector-python python-dotenv requests pandas
-```
-
-### 3. Set up Ollama
-
-Install Ollama from [ollama.com](https://ollama.com/) and download the model used by the application:
-
-```bash
+```powershell
 ollama pull qwen3.5:4b
 ```
 
-Make sure Ollama is running before starting the application.
+Keep Ollama running while using the application. To select a different Ollama
+model, set `OLLAMA_MODEL` in `.env`.
 
-### 4. Configure MySQL
+### Configure MySQL
 
-Create a `.env` file in the project root and add your database settings using the variable names expected by `app.py`.
+Create a dedicated account with read-only permissions. For example, replace
+`your_database` and the credentials with your own values:
 
-Example configuration:
+```sql
+CREATE USER 'nl2sql_reader'@'localhost' IDENTIFIED BY 'use-a-strong-password';
+GRANT SELECT ON `your_database`.* TO 'nl2sql_reader'@'localhost';
+```
+
+Create a `.env` file in the project root:
 
 ```env
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_NAME=your_database
-DB_USER=your_readonly_user
-DB_PASSWORD=your_password
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_DATABASE=your_database
+MYSQL_USER=nl2sql_reader
+MYSQL_PASSWORD=use-a-strong-password
+OLLAMA_MODEL=qwen3.5:4b
 ```
 
-**Important:** These environment variable names are examples. Match them to the names your application actually reads.
+The application defaults `OLLAMA_MODEL` to `qwen3.5:4b` if it is omitted.
 
-Use a dedicated MySQL account with only the permissions the application needs. Never commit your `.env` file or database credentials.
+## Run
 
-### 5. Run the application
+With the virtual environment active and MySQL and Ollama available:
 
-```bash
-python -m streamlit run main.py
+```powershell
+streamlit run main.py
 ```
 
-Open the local URL displayed in your terminal.
+Open the local URL printed by Streamlit.
 
-## Security Notes
+## Security notes
 
-AI-generated SQL can be incorrect or unsafe. This project includes SQL validation and user confirmation before execution, but these checks are not a complete security guarantee.
+- Use a dedicated MySQL account that has **SELECT-only** access to the target
+  database. The account's database permissions are the actual security
+  boundary; SQL keyword checks and read-only transactions are additional
+  safeguards, not substitutes for least privilege.
+- Never commit `.env` or share its database credentials. If credentials have
+  ever been committed or exposed, rotate the MySQL password immediately.
+- Review the generated SQL and confirm it in the UI before execution.
 
-- Use a dedicated, least-privilege MySQL account.
-- Keep database credentials in environment variables.
-- Review generated SQL before approving execution.
-- Do not expose the database publicly.
-- Test SQL validation against potentially destructive and unauthorized queries.
+## Limitations
 
-## Current Scope
+- SQL validation uses simple keyword checks rather than a complete MySQL
+  parser. It can reject otherwise valid SQL when names or functions contain
+  blocked keywords (for example `REPLACE()`), and it is not a security
+  boundary.
+- The default Ollama endpoint is local. Deploying this application for remote
+  users requires a hosted LLM endpoint and a hosted, appropriately secured
+  MySQL database.
+- SQL quality depends on the model, available schema, and wording of the
+  question.
 
-The current version focuses on generating and executing SQL queries against a configured MySQL database. Query accuracy depends on the model, database schema, and wording of the question.
+## Troubleshooting
 
-## Future Improvements
-
-- Improve schema-aware query generation.
-- Add automated SQL accuracy and safety tests.
-- Improve error handling and query explanations.
-- Add query history and execution-time metrics.
-- Support more complex database schemas.
-
-## Author
-
-**Ghulam e Mustafa**
-
-AI Automation & Agent Development
-
+- **`ModuleNotFoundError`:** Activate the project virtual environment and run
+  `pip install -r requirements.txt` again.
+- **Ollama connection refused:** Start Ollama, verify it is listening at
+  `http://localhost:11434`, and run `ollama pull qwen3.5:4b`.
+- **MySQL `Access denied`:** Check `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`,
+  and `MYSQL_PASSWORD` in `.env`. Confirm that the MySQL account can connect
+  from that host and has `SELECT` privileges on `MYSQL_DATABASE`.
